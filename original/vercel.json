@@ -1,0 +1,10 @@
+{
+  "cleanUrls": false,
+  "trailingSlash": true,
+  "rewrites": [
+    {
+      "source": "/zapi/:path*",
+      "destination": "https://api.zappy5.com/:path*"
+    }
+  ]
+}
