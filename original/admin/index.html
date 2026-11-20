@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>ניהול החנות</title>
+<style>
+:root{--bg:#f6f5f2;--card:#fff;--ink:#1d1d1b;--mut:#6b6b66;--line:#e3e1db;--acc:#2f5d50;--accink:#fff;--bad:#b3261e;--warn:#9a6700}
+@media (prefers-color-scheme:dark){:root{--bg:#161715;--card:#202220;--ink:#eeeeea;--mut:#a3a39c;--line:#363833;--acc:#6fb39f;--accink:#10201b;--bad:#ff8a80;--warn:#e3b341}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,"Segoe UI",Arial,sans-serif}
+header{display:flex;gap:12px;align-items:center;justify-content:space-between;padding:12px 16px;background:var(--card);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
+header h1{font-size:17px;margin:0}
+nav{display:flex;gap:6px;flex-wrap:wrap}
+button,.btn{font:inherit;cursor:pointer;border:1px solid var(--line);background:var(--card);color:var(--ink);padding:7px 14px;border-radius:8px}
+button:hover{border-color:var(--acc)}
+button.primary{background:var(--acc);color:var(--accink);border-color:var(--acc)}
+button.danger{color:var(--bad)}
+nav button.on{background:var(--acc);color:var(--accink);border-color:var(--acc)}
+main{max-width:1100px;margin:0 auto;padding:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:12px}
+input,select,textarea{font:inherit;width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+textarea{min-height:140px}
+label{display:block;font-size:13px;color:var(--mut);margin:10px 0 3px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:end}
+.row>*{flex:1 1 140px}
+.bar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.bar input,.bar select{flex:1 1 180px;width:auto}
+table{width:100%;border-collapse:collapse}
+th,td{text-align:right;padding:8px 6px;border-bottom:1px solid var(--line);vertical-align:middle}
+th{font-size:12px;color:var(--mut);font-weight:600}
+tr.click{cursor:pointer}
+tr.click:hover{background:var(--bg)}
+.tag{display:inline-block;padding:2px 9px;border-radius:99px;font-size:12px;border:1px solid var(--line)}
+.tag.ok{color:var(--acc);border-color:var(--acc)}
+.tag.warn{color:var(--warn);border-color:var(--warn)}
+.tag.bad{color:var(--bad);border-color:var(--bad)}
+.thumb{width:44px;height:44px;object-fit:cover;border-radius:6px;background:var(--line)}
+.imgs{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+.imgs div{position:relative}
+.imgs img{width:84px;height:84px;object-fit:cover;border-radius:8px;border:1px solid var(--line)}
+.imgs button{position:absolute;top:2px;left:2px;padding:0 7px;border-radius:99px;font-size:13px;line-height:20px}
+dialog{border:1px solid var(--line);border-radius:14px;background:var(--card);color:var(--ink);width:min(720px,96vw);padding:18px;max-height:92vh;overflow:auto}
+dialog::backdrop{background:rgba(0,0,0,.45)}
+.mut{color:var(--mut)}
+#login{max-width:360px;margin:12vh auto}
+#msg{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:9px 18px;border-radius:99px;display:none;z-index:50}
+.scroll{overflow-x:auto}
+@media (max-width:640px){.hide-s{display:none}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="msg"></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script>
+const SB_URL="https://qeolqmcqffiycwicyaas.supabase.co";
+const SB_KEY="sb_publishable_Bs5skyWI5FVG9sRdbGn6EA_F8CXYdwD";
+const sb=supabase.createClient(SB_URL,SB_KEY);
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const money=n=>"₪"+Number(n||0).toLocaleString("he-IL",{maximumFractionDigits:2});
+const fmtDate=d=>new Date(d).toLocaleString("he-IL",{dateStyle:"short",timeStyle:"short"});
+const imgUrl=p=>!p?"":/^(https?:)?\/\//.test(p)?p:"/"+p.replace(/^\/+/,"");
+function toast(t){const m=$("#msg");m.textContent=t;m.style.display="block";clearTimeout(toast.t);toast.t=setTimeout(()=>m.style.display="none",2600)}
+const ORDER_ST={pending:"ממתינה",paid:"שולמה",processing:"בטיפול",shipped:"נשלחה",completed:"הושלמה",cancelled:"בוטלה",refunded:"הוחזרה"};
+const PAY_ST={unpaid:"לא שולם",paid:"שולם",failed:"נכשל",refunded:"הוחזר"};
+const STOCK_ST={in_stock:"במלאי",out_of_stock:"אזל",on_backorder:"בהזמנה מראש"};
+let state={tab:"orders",cats:[],prods:[],orders:[]};
+
+async function boot(){
+  const {data:{session}}=await sb.auth.getSession();
+  if(!session)return showLogin();
+  const {data:ok,error}=await sb.rpc("is_admin");
+  if(error||!ok){
+    $("#app").innerHTML=`<div id="login" class="card"><h2>אין הרשאה</h2><p class="mut">המשתמש ${esc(session.user.email)} אינו מנהל.</p><button id="out">התנתקות</button></div>`;
+    $("#out").onclick=async()=>{await sb.auth.signOut();showLogin()};return;
+  }
+  await loadAll();renderShell();
+}
+function showLogin(){
+  $("#app").innerHTML=`<form id="login" class="card"><h2>כניסה לניהול</h2>
+  <label>אימייל</label><input id="em" type="email" autocomplete="username" required>
+  <label>סיסמה</label><input id="pw" type="password" autocomplete="current-password" required>
+  <p id="err" class="mut" style="color:var(--bad)"></p>
+  <button class="primary" style="width:100%">כניסה</button></form>`;
+  $("#login").onsubmit=async e=>{e.preventDefault();
+    const {error}=await sb.auth.signInWithPassword({email:$("#em").value.trim(),password:$("#pw").value});
+    if(error){$("#err").textContent="אימייל או סיסמה שגויים";return}
+    boot();};
+}
+async function loadAll(){
+  const [c,p,o]=await Promise.all([
+    sb.from("categories").select("*").order("sort_order").order("name"),
+    sb.from("products").select("*").order("sort_order").order("created_at",{ascending:false}),
+    sb.from("orders").select("*,order_items(*)").order("created_at",{ascending:false}).limit(500)]);
+  [c,p,o].forEach(r=>{if(r.error)toast("שגיאת טעינה: "+r.error.message)});
+  state.cats=c.data||[];state.prods=p.data||[];state.orders=o.data||[];
+}
+function renderShell(){
+  $("#app").innerHTML=`<header><h1>ניהול החנות</h1>
+  <nav>${[["orders","הזמנות"],["products","מוצרים"],["categories","קטגוריות"]].map(([k,l])=>`<button data-t="${k}" class="${state.tab===k?"on":""}">${l}</button>`).join("")}</nav>
+  <button id="out">התנתקות</button></header><main id="main"></main><dialog id="dlg"></dialog>`;
+  document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{state.tab=b.dataset.t;renderShell()});
+  $("#out").onclick=async()=>{await sb.auth.signOut();showLogin()};
+  ({orders:viewOrders,products:viewProducts,categories:viewCats})[state.tab]();
+}
+const catName=id=>(state.cats.find(c=>c.id===id)||{}).name||"—";
+const stTag=s=>`<span class="tag ${s==="paid"||s==="completed"||s==="shipped"?"ok":s==="cancelled"||s==="refunded"?"bad":"warn"}">${ORDER_ST[s]||s}</span>`;
+
+/* ---------- Orders ---------- */
+function viewOrders(){
+  $("#main").innerHTML=`<div class="bar"><input id="q" placeholder="חיפוש לפי שם, אימייל, טלפון או מספר הזמנה">
+  <select id="fs"><option value="">כל הסטטוסים</option>${Object.entries(ORDER_ST).map(([k,v])=>`<option value="${k}">${v}</option>`).join("")}</select>
+  <button id="csv">ייצוא ל-CSV</button><button id="rf">רענון</button></div><div class="card scroll"><table><thead><tr><th>#</th><th>תאריך</th><th>לקוח</th><th class="hide-s">פריטים</th><th>סה"כ</th><th>סטטוס</th></tr></thead><tbody id="tb"></tbody></table></div>`;
+  const draw=()=>{const q=$("#q").value.trim().toLowerCase(),fs=$("#fs").value;
+    const list=state.orders.filter(o=>(!fs||o.status===fs)&&(!q||[o.order_number,o.customer_name,o.customer_email,o.customer_phone].join(" ").toLowerCase().includes(q)));
+    $("#tb").innerHTML=list.map(o=>`<tr class="click" data-id="${o.id}"><td>${o.order_number}</td><td>${fmtDate(o.created_at)}</td><td>${esc(o.customer_name)}<div class="mut">${esc(o.customer_phone)}</div></td><td class="hide-s">${(o.order_items||[]).reduce((a,i)=>a+i.quantity,0)}</td><td>${money(o.total)}</td><td>${stTag(o.status)}</td></tr>`).join("")||`<tr><td colspan="6" class="mut">אין הזמנות</td></tr>`;
+    document.querySelectorAll("#tb tr.click").forEach(r=>r.onclick=()=>orderDialog(r.dataset.id));
+    draw.list=list};
+  $("#q").oninput=draw;$("#fs").onchange=draw;draw();
+  $("#rf").onclick=async()=>{await loadAll();viewOrders()};
+  $("#csv").onclick=()=>{const rows=[["מספר","תאריך","שם","אימייל","טלפון","עיר","רחוב","סטטוס","תשלום","סכום","פריטים"]];
+    draw.list.forEach(o=>rows.push([o.order_number,o.created_at,o.customer_name,o.customer_email,o.customer_phone,o.shipping_city,[o.shipping_street,o.shipping_house].filter(Boolean).join(" "),ORDER_ST[o.status],PAY_ST[o.payment_status],o.total,(o.order_items||[]).map(i=>i.quantity+"x "+i.name).join(" | ")]));
+    const f=v=>{v=String(v??"");if(/^[=+\-@]/.test(v))v="'"+v;return '"'+v.replace(/"/g,'""')+'"'};
+    const blob=new Blob(["﻿"+rows.map(r=>r.map(f).join(",")).join("\r\n")],{type:"text/csv;charset=utf-8"});
+    const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="orders-"+new Date().toISOString().slice(0,10)+".csv";a.click()};
+}
+function orderDialog(id){
+  const o=state.orders.find(x=>x.id===id);const d=$("#dlg");
+  d.innerHTML=`<h2>הזמנה #${o.order_number}</h2><p class="mut">${fmtDate(o.created_at)}</p>
+  <div class="row"><div><b>${esc(o.customer_name)}</b><br>${esc(o.customer_phone)}<br><a href="mailto:${esc(o.customer_email)}">${esc(o.customer_email)}</a></div>
+  <div>${esc(o.shipping_method||"")}<br>${esc([o.shipping_street,o.shipping_house,o.shipping_apartment&&"דירה "+o.shipping_apartment].filter(Boolean).join(" "))}<br>${esc([o.shipping_city,o.shipping_zip].filter(Boolean).join(" "))}</div></div>
+  ${o.notes?`<label>הערת לקוח</label><div class="card">${esc(o.notes)}</div>`:""}
+  <table style="margin-top:10px"><tbody>${(o.order_items||[]).map(i=>`<tr><td>${i.image?`<img class="thumb" src="${esc(imgUrl(i.image))}" alt="">`:""}</td><td>${esc(i.name)}<div class="mut">${esc(i.sku||"")}</div></td><td>${i.quantity} × ${money(i.unit_price)}</td><td>${money(i.quantity*i.unit_price)}</td></tr>`).join("")}
+  <tr><td colspan="3">משלוח</td><td>${money(o.shipping_total)}</td></tr><tr><td colspan="3"><b>סה"כ</b></td><td><b>${money(o.total)}</b></td></tr></tbody></table>
+  <div class="row"><div><label>סטטוס הזמנה</label><select id="os">${Object.entries(ORDER_ST).map(([k,v])=>`<option value="${k}" ${o.status===k?"selected":""}>${v}</option>`).join("")}</select></div>
+  <div><label>תשלום</label><select id="ps">${Object.entries(PAY_ST).map(([k,v])=>`<option value="${k}" ${o.payment_status===k?"selected":""}>${v}</option>`).join("")}</select></div></div>
+  <label>הערות פנימיות</label><textarea id="an" style="min-height:70px">${esc(o.admin_notes||"")}</textarea>
+  <div class="row" style="margin-top:14px"><button class="primary" id="sv">שמירה</button><button id="cl">סגירה</button></div>`;
+  d.showModal();$("#cl").onclick=()=>d.close();
+  $("#sv").onclick=async()=>{const patch={status:$("#os").value,payment_status:$("#ps").value,admin_notes:$("#an").value||null};
+    const {error}=await sb.from("orders").update(patch).eq("id",id);
+    if(error)return toast("שגיאה: "+error.message);Object.assign(o,patch);d.close();toast("נשמר");viewOrders()};
+}
+
+/* ---------- Products ---------- */
+function viewProducts(){
+  $("#main").innerHTML=`<div class="bar"><input id="q" placeholder="חיפוש לפי שם או מק״ט"><select id="fc"><option value="">כל הקטגוריות</option>${state.cats.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join("")}</select><button class="primary" id="add">+ מוצר חדש</button></div>
+  <div class="card scroll"><table><thead><tr><th></th><th>שם</th><th class="hide-s">קטגוריה</th><th>מחיר</th><th class="hide-s">מלאי</th><th>פעיל</th></tr></thead><tbody id="tb"></tbody></table></div>`;
+  const draw=()=>{const q=$("#q").value.trim().toLowerCase(),fc=$("#fc").value;
+    const list=state.prods.filter(p=>(!fc||p.category_id===fc)&&(!q||(p.name+" "+(p.sku||"")).toLowerCase().includes(q)));
+    $("#tb").innerHTML=list.map(p=>`<tr class="click" data-id="${p.id}"><td><img class="thumb" src="${esc(imgUrl((p.images||[])[0]))}" alt=""></td><td>${esc(p.name)}<div class="mut">${esc(p.sku||"")}</div></td><td class="hide-s">${esc(catName(p.category_id))}</td><td>${p.sale_price?`<s class="mut">${money(p.price)}</s> `:""}${money(p.sale_price||p.price)}</td><td class="hide-s">${STOCK_ST[p.stock_status]}${p.stock_qty!=null?` (${p.stock_qty})`:""}</td><td>${p.is_active?'<span class="tag ok">כן</span>':'<span class="tag bad">לא</span>'}</td></tr>`).join("")||`<tr><td colspan="6" class="mut">אין מוצרים</td></tr>`;
+    document.querySelectorAll("#tb tr.click").forEach(r=>r.onclick=()=>productDialog(r.dataset.id))};
+  $("#q").oninput=draw;$("#fc").onchange=draw;draw();$("#add").onclick=()=>productDialog(null);
+}
+function slugify(s){const t=String(s).toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");return (t||"item")+"-"+Math.random().toString(36).slice(2,7)}
+function productDialog(id){
+  const isNew=!id;const p=isNew?{name:"",slug:"",price:0,images:[],stock_status:"in_stock",is_active:true,is_featured:false,sort_order:0}:{...state.prods.find(x=>x.id===id)};
+  let imgs=[...(p.images||[])];const d=$("#dlg");
+  const drawImgs=()=>{$("#imgs").innerHTML=imgs.map((u,i)=>`<div><img src="${esc(imgUrl(u))}" alt=""><button data-i="${i}" title="הסרה">×</button></div>`).join("");
+    $("#imgs").querySelectorAll("button").forEach(b=>b.onclick=()=>{imgs.splice(+b.dataset.i,1);drawImgs()})};
+  d.innerHTML=`<h2>${isNew?"מוצר חדש":"עריכת מוצר"}</h2>
+  <label>שם</label><input id="f_name" value="${esc(p.name)}">
+  <div class="row"><div><label>קטגוריה</label><select id="f_cat"><option value="">ללא</option>${state.cats.map(c=>`<option value="${c.id}" ${p.category_id===c.id?"selected":""}>${esc(c.name)}</option>`).join("")}</select></div>
+  <div><label>מק״ט</label><input id="f_sku" value="${esc(p.sku||"")}"></div></div>
+  <div class="row"><div><label>מחיר (₪)</label><input id="f_price" type="number" step="0.01" min="0" value="${p.price}"></div>
+  <div><label>מחיר מבצע (ריק = אין)</label><input id="f_sale" type="number" step="0.01" min="0" value="${p.sale_price??""}"></div>
+  <div><label>סטטוס מלאי</label><select id="f_stock">${Object.entries(STOCK_ST).map(([k,v])=>`<option value="${k}" ${p.stock_status===k?"selected":""}>${v}</option>`).join("")}</select></div>
+  <div><label>כמות במלאי (ריק = לא מנוהל)</label><input id="f_qty" type="number" min="0" value="${p.stock_qty??""}"></div></div>
+  <label>תיאור (HTML בסיסי)</label><textarea id="f_desc">${esc(p.description||"")}</textarea>
+  <label>תמונות</label><div class="imgs" id="imgs"></div><input id="f_file" type="file" accept="image/*" multiple style="margin-top:8px">
+  <div class="row" style="margin-top:8px"><label style="display:flex;gap:6px;align-items:center;margin:0"><input id="f_act" type="checkbox" style="width:auto" ${p.is_active?"checked":""}> פעיל באתר</label>
+  <label style="display:flex;gap:6px;align-items:center;margin:0"><input id="f_feat" type="checkbox" style="width:auto" ${p.is_featured?"checked":""}> מוצר מומלץ</label>
+  <div><label>סדר תצוגה</label><input id="f_sort" type="number" value="${p.sort_order||0}"></div></div>
+  <div class="row" style="margin-top:14px"><button class="primary" id="sv">שמירה</button>${isNew?"":'<button class="danger" id="del">מחיקה</button>'}<button id="cl">ביטול</button></div>`;
+  d.showModal();drawImgs();$("#cl").onclick=()=>d.close();
+  $("#f_file").onchange=async e=>{for(const f of e.target.files){
+      const ext=(f.name.split(".").pop()||"jpg").toLowerCase().replace(/[^a-z0-9]/g,"");
+      const path=`${Date.now()}-${Math.random().toString(36).slice(2,7)}.${ext}`;
+      const {error}=await sb.storage.from("products").upload(path,f,{contentType:f.type,upsert:false});
+      if(error){toast("העלאה נכשלה: "+error.message);continue}
+      imgs.push(sb.storage.from("products").getPublicUrl(path).data.publicUrl);drawImgs()}
+    e.target.value=""};
+  $("#sv").onclick=async()=>{
+    const name=$("#f_name").value.trim();if(!name)return toast("חסר שם");
+    const price=parseFloat($("#f_price").value);if(!(price>=0))return toast("מחיר לא תקין");
+    const sale=$("#f_sale").value===""?null:parseFloat($("#f_sale").value);
+    if(sale!=null&&!(sale>=0))return toast("מחיר מבצע לא תקין");
+    const row={name,category_id:$("#f_cat").value||null,sku:$("#f_sku").value.trim()||null,price,sale_price:sale,stock_status:$("#f_stock").value,
+      stock_qty:$("#f_qty").value===""?null:parseInt($("#f_qty").value,10),description:$("#f_desc").value||null,images:imgs,
+      is_active:$("#f_act").checked,is_featured:$("#f_feat").checked,sort_order:parseInt($("#f_sort").value,10)||0};
+    let r;if(isNew){row.slug=slugify(name);r=await sb.from("products").insert(row).select().single()}
+    else r=await sb.from("products").update(row).eq("id",id).select().single();
+    if(r.error)return toast("שגיאה: "+r.error.message);
+    if(isNew)state.prods.unshift(r.data);else state.prods[state.prods.findIndex(x=>x.id===id)]=r.data;
+    d.close();toast("נשמר");viewProducts()};
+  if(!isNew)$("#del").onclick=async()=>{if(!confirm("למחוק את המוצר? אי אפשר לשחזר. (אפשר במקום זה לבטל 'פעיל באתר')"))return;
+    const {error}=await sb.from("products").delete().eq("id",id);if(error)return toast("שגיאה: "+error.message);
+    state.prods=state.prods.filter(x=>x.id!==id);d.close();toast("נמחק");viewProducts()};
+}
+
+/* ---------- Categories ---------- */
+function viewCats(){
+  $("#main").innerHTML=`<div class="bar"><button class="primary" id="add">+ קטגוריה חדשה</button></div><div class="card scroll"><table><thead><tr><th>שם</th><th class="hide-s">קטגוריית אב</th><th>מוצרים</th><th>פעילה</th></tr></thead><tbody>
+  ${state.cats.map(c=>`<tr class="click" data-id="${c.id}"><td>${esc(c.name)}<div class="mut">${esc(c.slug)}</div></td><td class="hide-s">${c.parent_id?esc(catName(c.parent_id)):"—"}</td><td>${state.prods.filter(p=>p.category_id===c.id).length}</td><td>${c.is_active?'<span class="tag ok">כן</span>':'<span class="tag bad">לא</span>'}</td></tr>`).join("")}</tbody></table></div>`;
+  document.querySelectorAll("tr.click").forEach(r=>r.onclick=()=>catDialog(r.dataset.id));$("#add").onclick=()=>catDialog(null);
+}
+function catDialog(id){
+  const isNew=!id;const c=isNew?{name:"",is_active:true,sort_order:0}:{...state.cats.find(x=>x.id===id)};const d=$("#dlg");
+  d.innerHTML=`<h2>${isNew?"קטגוריה חדשה":"עריכת קטגוריה"}</h2>
+  <label>שם</label><input id="c_name" value="${esc(c.name)}">
+  <label>קטגוריית אב</label><select id="c_par"><option value="">ללא</option>${state.cats.filter(x=>x.id!==id).map(x=>`<option value="${x.id}" ${c.parent_id===x.id?"selected":""}>${esc(x.name)}</option>`).join("")}</select>
+  <div class="row"><div><label>סדר תצוגה</label><input id="c_sort" type="number" value="${c.sort_order||0}"></div>
+  <label style="display:flex;gap:6px;align-items:center"><input id="c_act" type="checkbox" style="width:auto" ${c.is_active?"checked":""}> פעילה</label></div>
+  <div class="row" style="margin-top:14px"><button class="primary" id="sv">שמירה</button>${isNew?"":'<button class="danger" id="del">מחיקה</button>'}<button id="cl">ביטול</button></div>`;
+  d.showModal();$("#cl").onclick=()=>d.close();
+  $("#sv").onclick=async()=>{const name=$("#c_name").value.trim();if(!name)return toast("חסר שם");
+    const row={name,parent_id:$("#c_par").value||null,sort_order:parseInt($("#c_sort").value,10)||0,is_active:$("#c_act").checked};
+    let r;if(isNew){row.slug=slugify(name);r=await sb.from("categories").insert(row).select().single()}
+    else r=await sb.from("categories").update(row).eq("id",id).select().single();
+    if(r.error)return toast("שגיאה: "+r.error.message);
+    if(isNew)state.cats.push(r.data);else state.cats[state.cats.findIndex(x=>x.id===id)]=r.data;
+    d.close();toast("נשמר");viewCats()};
+  if(!isNew)$("#del").onclick=async()=>{if(!confirm("למחוק את הקטגוריה? המוצרים שבה יישארו בלי קטגוריה."))return;
+    const {error}=await sb.from("categories").delete().eq("id",id);if(error)return toast("שגיאה: "+error.message);
+    state.cats=state.cats.filter(x=>x.id!==id);d.close();toast("נמחק");viewCats()};
+}
+boot();
+</script>
+</body>
+</html>
