@@ -82,13 +82,14 @@ async function boot(){
 function showLogin(){
   $("#app").innerHTML=`<form id="login" class="card"><h2>כניסה לניהול</h2>
   <label>אימייל</label><input id="em" type="email" autocomplete="username" required>
-  <label>סיסמה</label><input id="pw" type="password" autocomplete="current-password" required>
   <p id="err" class="mut" style="color:var(--bad)"></p>
-  <button class="primary" style="width:100%">כניסה</button></form>`;
+  <button class="primary" style="width:100%">שלחו לי קישור כניסה</button>
+  <p class="mut" style="font-size:13px">נשלח אליכם מייל עם קישור חד-פעמי. אין סיסמה.</p></form>`;
   $("#login").onsubmit=async e=>{e.preventDefault();
-    const {error}=await sb.auth.signInWithPassword({email:$("#em").value.trim(),password:$("#pw").value});
-    if(error){$("#err").textContent="אימייל או סיסמה שגויים";return}
-    boot();};
+    const email=$("#em").value.trim();
+    const {error}=await sb.auth.signInWithOtp({email,options:{emailRedirectTo:location.origin+"/admin/"}});
+    if(error){$("#err").textContent=error.status===429?"נשלחו יותר מדי מיילים, נסו שוב בעוד כמה דקות":"השליחה נכשלה: "+error.message;return}
+    $("#login").innerHTML=`<h2>בדקו את המייל</h2><p>שלחנו קישור כניסה אל <b>${esc(email)}</b>. לחצו עליו כדי להיכנס.</p><p class="mut">לא הגיע? בדקו בספאם.</p>`;};
 }
 async function loadAll(){
   const [c,p,o]=await Promise.all([
